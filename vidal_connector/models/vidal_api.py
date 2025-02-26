@@ -9,7 +9,7 @@ from odoo.exceptions import UserError
 _logger = logging.getLogger(__name__)
 
 
-VIDAL_BASE_URL = "https://api.vidal.fr/rest/api/"
+VIDAL_BASE_URL = "https://api.vidal.fr"
 
 
 class VidalApi(models.Model):
@@ -26,10 +26,12 @@ class VidalApi(models.Model):
         )
         return authentication
 
-    def api_post(self, url, data):
-        headers = "Content-Type: text/xml"
+    def api_post(self, url, data, full=False):
+        headers = {"Content-Type": "text/xml"}
         authentication = self.get_authentication()
-        url_request = VIDAL_BASE_URL + url + authentication
+        url_request = (
+            VIDAL_BASE_URL + ("/rest/api/" if not full else "") + url + authentication
+        )
         try:
             r = requests.post(url_request, data=data, headers=headers, timeout=20)
             if r.status_code == 500:
@@ -40,7 +42,7 @@ class VidalApi(models.Model):
                     )
                     % (url_request)
                 )
-            elif r.status_code != 201:
+            elif r.status_code not in [200, 201]:
                 raise UserError(
                     _(
                         "Message vidal %(message)s - Detail %(detail)s - \
@@ -57,19 +59,26 @@ class VidalApi(models.Model):
             r.raise_for_status()
         except requests.exceptions.RequestException as e:
             _logger.exception(e)
-            raise UserError from None(
+            raise UserError(
                 _(
                     "We had trouble to create your data, please retry later or\
                     contact your support if the problem persists - Network \
                     Error sur %s"
                 )
                 % (url_request)
-            )
-        return r
+            ) from e
+        return feedparser.parse(r.content)
 
-    def api_get(self, url, query):
+    def api_get(self, url, full=False, **kwargs):
         authentication = self.get_authentication()
-        url_request = VIDAL_BASE_URL + url + authentication + "&q=" + query
+        url_request = (
+            VIDAL_BASE_URL
+            + ("/rest/api/" if not full else "")
+            + url
+            + authentication
+            + "&"
+            + "&".join(f"{k}={v}" for k, v in kwargs.items())
+        )
         try:
             r = requests.get(url_request, timeout=20)
             if r.status_code == 500:
@@ -93,16 +102,16 @@ class VidalApi(models.Model):
                         "code": r.status_code,
                         "url": url_request,
                     }
-                )
+                ) from None
             r.raise_for_status()
         except requests.exceptions.RequestException as e:
             _logger.exception(e)
-            raise UserError from None(
+            raise UserError(
                 _(
                     "We had trouble to create your data, please retry later or\
                     contact your support if the problem persists - Network \
                     Error sur %s"
                 )
                 % (url_request)
-            )
-        return feedparser.parse(r)
+            ) from e
+        return feedparser.parse(r.content)
